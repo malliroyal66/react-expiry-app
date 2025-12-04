@@ -2,7 +2,7 @@
 // It securely fetches data from external sources (like Google Sheets) and returns
 // clean JSON to the React frontend, bypassing CORS and security issues.
 
-import { GoogleSpreadsheet } from 'google-spreadsheet';
+//import { GoogleSpreadsheet } from 'google-spreadsheet';
 
 // --- 1. GOOGLE SHEETS CONFIGURATION ---
 // These are loaded from Vercel Environment Variables
@@ -128,3 +128,4 @@ export default async function handler(req, res) {
     // Vercel serverless function returns the processed raw data array
     res.status(200).json(finalData);
 }
+
