@@ -5,11 +5,14 @@ const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINIFTY"];
 
 // The original source URL is: https://growwapi-assets.groww.in/instruments/instrument.csv
 // ATTENTION: Direct URL access failed due to CORS policy block. We must use a proxy.
-// Using 'cors-anywhere' on Heroku as the third attempt, often the most stable dev proxy.
+
 const SOURCE_URL = "https://growwapi-assets.groww.in/instruments/instrument.csv";
-const PROXY_URL = "https://cors-anywhere.herokuapp.com/"; 
-// The proxy expects the target URL to be appended directly after its address.
-const SCRIPT_URL = `${PROXY_URL}${SOURCE_URL}`;
+
+// Attempt 4: Using api.allorigins.win/raw?url=...
+// This proxy wraps the target URL and returns the raw content, typically bypassing CORS issues.
+const ALLORIGINS_PROXY = "https://api.allorigins.win/raw?url=";
+// We must URI-encode the source URL before appending it as a query parameter.
+const SCRIPT_URL = `${ALLORIGINS_PROXY}${encodeURIComponent(SOURCE_URL)}`;
 
 // Helper function to format date from YYYY-MM-DD to DD-MM-YYYY
 const formatDate = (dateString) => {
