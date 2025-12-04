@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 // Define the exact symbols we are interested in
 const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY","MIDCPNIFTY","BANKEX"];
-// FIX: The direct link caused a CORS (Cross-Origin Resource Sharing) policy error. 
-// We are now routing the request through a public CORS proxy to bypass the restriction.
-const SCRIPT_URL = "https://api.allorigins.win/raw?url=https://groww.in/instruments/instrument.csv"; 
+
+// The confirmed source URL is: https://growwapi-assets.groww.in/instruments/instrument.csv
+// We must route the request through a public CORS proxy to bypass the browser's Cross-Origin Resource Sharing (CORS) security policy.
+const SCRIPT_URL = "https://api.allorigins.win/raw?url=https://growwapi-assets.groww.in/instruments/instrument.csv"; 
 
 // Helper function to format date from YYYY-MM-DD to DD-MM-YYYY
 const formatDate = (dateString) => {
