@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 // Define the exact symbols we are interested in
 const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY","MIDCPNIFTY","BANKEX"];
-const SCRIPT_URL = "/groww-api/instruments/instrument.csv"; 
+// FIX: Changed the relative proxy path to the absolute, public URL to resolve 404 errors in deployment environments.
+const SCRIPT_URL = "https://groww.in/instruments/instrument.csv"; 
 
 // Helper function to format date from YYYY-MM-DD to DD-MM-YYYY
 const formatDate = (dateString) => {
