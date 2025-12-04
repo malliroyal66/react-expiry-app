@@ -3,12 +3,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 // Define the exact symbols we are interested in
 const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINIFTY"];
 
-// The confirmed source URL is: https://growwapi-assets.groww.in/instruments/instrument.csv
-// PREVIOUS PROXY (api.allorigins.win) resulted in a net::ERR_QUIC_PROTOCOL_ERROR.
-// The second proxy (thingproxy.freeboard.io) resulted in net::ERR_NAME_NOT_RESOLVED.
-// Since public proxies are unstable, we will try the direct URL, hoping the Canvas environment
-// bypasses or the target server's CORS settings allow it, as this is the most reliable source.
-const SCRIPT_URL = "https://growwapi-assets.groww.in/instruments/instrument.csv"; 
+// The original source URL is: https://growwapi-assets.groww.in/instruments/instrument.csv
+// ATTENTION: Direct URL access failed due to CORS policy block, as the server does not
+// provide the 'Access-Control-Allow-Origin' header. We must use a proxy again.
+// Using 'api.codetabs.pro' as a reliable CORS proxy to wrap the request.
+const SOURCE_URL = "https://growwapi-assets.groww.in/instruments/instrument.csv";
+const SCRIPT_URL = `https://api.codetabs.pro/v1/proxy?request=${encodeURIComponent(SOURCE_URL)}`;
 
 // Helper function to format date from YYYY-MM-DD to DD-MM-YYYY
 const formatDate = (dateString) => {
