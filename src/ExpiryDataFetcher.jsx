@@ -4,15 +4,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINIFTY"];
 
 // The original source URL is: https://growwapi-assets.groww.in/instruments/instrument.csv
-// ATTENTION: Direct URL access failed due to CORS policy block. We must use a proxy.
-
 const SOURCE_URL = "https://growwapi-assets.groww.in/instruments/instrument.csv";
 
-// Attempt 5: Using thingproxy.freeboard.io/fetch/
-// This is another reliable public proxy known to successfully retrieve content for CORS-restricted sources.
-const THINGPROXY_PROXY = "https://thingproxy.freeboard.io/fetch/";
-// Append the source URL directly to the proxy path.
-const SCRIPT_URL = `${THINGPROXY_PROXY}${SOURCE_URL}`;
+// Attempt 6: Reverting to direct URL. 
+// All previous public proxy attempts (CORS-Anywhere, AllOrigins, ThingProxy, etc.) have failed due to 
+// various network issues (QUIC error, 403 Forbidden, 502 Bad Gateway, DNS resolution error).
+// We are reverting to the original URL to confirm the direct CORS block is the only remaining issue, 
+// as public proxies are too unreliable.
+const SCRIPT_URL = SOURCE_URL; 
 
 // Helper function to format date from YYYY-MM-DD to DD-MM-YYYY
 const formatDate = (dateString) => {
@@ -203,7 +202,16 @@ function ExpiryDataFetcher() {
         {error && (
           <div style={errorContainerStyle}>
             <p style={{ fontWeight: 'bold' }}>❌ Error fetching data:</p>
-            <p style={{ fontSize: '0.875rem', fontStyle: 'italic' }}>{error}</p>
+            <p style={{ fontSize: '0.875rem', fontStyle: 'italic' }}>
+                {error}
+                <br /><br />
+                {/* Custom message for the persistent CORS issue */}
+                {error.includes("Failed to fetch") || error.includes("CORS") ? (
+                    <>
+                        <span style={{fontWeight: 'bold'}}>Status: Unresolvable CORS Issue.</span> The original data source is inaccessible to front-end web apps due to its server security policy, and all public proxies tested have failed due to their own network issues (DNS failure, 403 Forbidden, 502 Bad Gateway). The only solution is to host the data on a server you control or upload the CSV file directly.
+                    </>
+                ) : null}
+            </p>
           </div>
         )}
 
