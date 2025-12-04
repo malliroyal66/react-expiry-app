@@ -8,11 +8,11 @@ const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINIFTY"];
 
 const SOURCE_URL = "https://growwapi-assets.groww.in/instruments/instrument.csv";
 
-// Attempt 4: Using api.allorigins.win/raw?url=...
-// This proxy wraps the target URL and returns the raw content, typically bypassing CORS issues.
-const ALLORIGINS_PROXY = "https://api.allorigins.win/raw?url=";
-// We must URI-encode the source URL before appending it as a query parameter.
-const SCRIPT_URL = `${ALLORIGINS_PROXY}${encodeURIComponent(SOURCE_URL)}`;
+// Attempt 5: Using thingproxy.freeboard.io/fetch/
+// This is another reliable public proxy known to successfully retrieve content for CORS-restricted sources.
+const THINGPROXY_PROXY = "https://thingproxy.freeboard.io/fetch/";
+// Append the source URL directly to the proxy path.
+const SCRIPT_URL = `${THINGPROXY_PROXY}${SOURCE_URL}`;
 
 // Helper function to format date from YYYY-MM-DD to DD-MM-YYYY
 const formatDate = (dateString) => {
