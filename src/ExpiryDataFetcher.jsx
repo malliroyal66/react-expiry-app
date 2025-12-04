@@ -1,432 +1,130 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// This file contains the serverless function logic to run on Vercel.
+// It securely fetches data from external sources (like Google Sheets) and returns
+// clean JSON to the React frontend, bypassing CORS and security issues.
 
-// Define the exact symbols we are interested in
-const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINIFTY", "MIDCPNIFTY", "BANKEX"];
+import { GoogleSpreadsheet } from 'google-spreadsheet';
 
-// The target source URL for the Gzipped JSON file
-const SOURCE_URL = "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz";
+// --- 1. GOOGLE SHEETS CONFIGURATION ---
+// These are loaded from Vercel Environment Variables
+const SHEET_ID = process.env.GOOGLE_SHEET_ID;
+const CLIENT_EMAIL = process.env.G_SHEET_CLIENT_EMAIL;
+const PRIVATE_KEY = process.env.G_SHEET_PRIVATE_KEY?.replace(/\\n/g, '\n'); // Handle newline characters
 
-// Helper function to convert Unix Timestamp (ms) to YYYY-MM-DD
-const timestampToYYYYMMDD = (timestamp) => {
-    if (!timestamp) return null;
-    try {
-        const date = new Date(Number(timestamp));
-        // Check for invalid date
-        if (isNaN(date.getTime())) return null; 
-        
-        const yyyy = date.getFullYear();
-        const mm = String(date.getMonth() + 1).padStart(2, '0');
-        const dd = String(date.getDate()).padStart(2, '0');
-        return `${yyyy}-${mm}-${dd}`; // YYYY-MM-DD format for internal sorting
-    } catch (e) {
-        // Invalid timestamp format
-        return null;
-    }
-};
-
-// Helper function to format date from YYYY-MM-DD to DD-MM-YYYY for display
-const formatDate = (dateString) => {
-    // dateString is assumed to be in YYYY-MM-DD format
-    const parts = dateString.split('-');
-    if (parts.length === 3) {
-        return `${parts[2]}-${parts[1]}-${parts[0]}`; // DD-MM-YYYY
-    }
-    return dateString;
-};
-
-// --- 1. JSON Parsing and Aggregation Function ---
-const parseJSONAndAggregate = (instrumentData) => {
-    if (!Array.isArray(instrumentData)) {
-        console.error("Input is not a valid JSON array or the GZIP file failed to decompress.");
-        return [];
+// --- Date Parsing Utility (New) ---
+// Function to convert "DD/MM/YYYY" or "YYYY-MM-DD" string format to Unix milliseconds.
+function parseDateToTimestamp(dateString) {
+    if (!dateString) return 0;
+    
+    // Check for common formats (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD)
+    let dateParts;
+    if (dateString.includes('-')) {
+        dateParts = dateString.split('-');
+    } else if (dateString.includes('/')) {
+        dateParts = dateString.split('/');
+    } else {
+        // Assume YYYYMMDD if no delimiters found
+        if (dateString.length === 8) {
+             dateParts = [dateString.substring(0,4), dateString.substring(4,6), dateString.substring(6,8)];
+        } else {
+             return 0;
+        }
     }
     
-    const expiryMap = {};
-    ALLOWED_SYMBOLS.forEach(symbol => {
-        expiryMap[symbol] = new Set();
-    });
+    if (dateParts.length !== 3) return 0;
 
-    for (const row of instrumentData) {
-        const inst = row.instrument_type ? row.instrument_type.trim() : '';
-        const symbol = row.underlying_symbol ? row.underlying_symbol.trim() : '';
-        const expiryTimestamp = row.expiry;
-
-        // 1. Filter: Instrument Type is CE or PE
-        // 2. Filter: Symbol is in ALLOWED_SYMBOLS
-        if ((inst === "CE" || inst === "PE") && ALLOWED_SYMBOLS.includes(symbol)) {
-            
-            // 3. Convert timestamp to YYYY-MM-DD
-            const expiryDateString = timestampToYYYYMMDD(expiryTimestamp);
-
-            // 4. Filter: Expiry is valid
-            if (expiryDateString) {
-                expiryMap[symbol].add(expiryDateString); 
-            }
-        }
+    let year, month, day;
+    // Attempt to guess D/M/Y vs Y/M/D order
+    if (dateParts[0].length === 4) { // YYYY-MM-DD
+        year = dateParts[0];
+        month = dateParts[1];
+        day = dateParts[2];
+    } else { // DD-MM-YYYY or MM-DD-YYYY (Assuming DD-MM-YYYY which is common for Indian indices)
+        day = dateParts[0];
+        month = dateParts[1];
+        year = dateParts[2];
     }
 
-    // Prepare final output
-    const finalData = [];
-
-    ALLOWED_SYMBOLS.forEach(symbol => {
-        const sortedDates = Array.from(expiryMap[symbol]).sort(); 
-        const firstTwo = sortedDates.slice(0, 2); 
-
-        if (firstTwo.length === 0) {
-            finalData.push({ Symbol: symbol, 'Expiry Date': "NO DATA" });
-        } else {
-            firstTwo.forEach(exp => {
-                finalData.push({ Symbol: symbol, 'Expiry Date': formatDate(exp) });
-            });
-        }
-    });
-
-    return finalData;
-};
-// --- End Parsing/Aggregation Function ---
-
-
-function ExpiryDataFetcher() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false); 
-  const [error, setError] = useState(null);
-  const [isButtonHovering, setIsButtonHovering] = useState(false);
-  const [hoveredRowIndex, setHoveredRowIndex] = useState(null);
-  const [isButtonPressed, setIsButtonPressed] = useState(false);
-  const [lastRefreshTime, setLastRefreshTime] = useState(null);
-
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    // --- START: Live Fetch Logic ---
-    try {
-        const response = await fetch(SOURCE_URL);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}. The external server may be blocking this client request.`);
-        }
-
-        // CRITICAL STEP: Attempting to parse the response as JSON.
-        // This will likely FAIL because the response body is GZIP compressed.
-        const instrumentData = await response.json(); 
-
-        const finalData = parseJSONAndAggregate(instrumentData); 
-        
-        setData(finalData);
-        setLastRefreshTime(new Date()); 
-        setError(null); 
-        
-    } catch (e) {
-        // Catch network errors, CORS errors, and the expected JSON SyntaxError 
-        // (due to trying to parse a GZIP file as JSON).
-        const errorMessage = `Failed to fetch or process data. Error: ${e.message}. 
-        This is typically due to the file being GZIP compressed (.gz) and the browser not being 
-        able to decompress it automatically, or a restrictive CORS policy from the server.
-        A dedicated server-side proxy is required for stable access.`;
-        
-        setError(errorMessage);
-        console.error("Fetch/Processing failed:", e);
-
-        // Clear existing data or set to default if error occurs
-        setData(null); 
-        setLastRefreshTime(null);
-    } finally {
-        setLoading(false);
-    }
-    // --- END: Live Fetch Logic ---
-  }, []); 
-
-  // Initial data load on component mount and setting up the interval
-  useEffect(() => {
-    fetchData();
-
-    // Set up auto-fetch every 60 seconds (1 minute)
-    const intervalId = setInterval(() => {
-        fetchData();
-    }, 60000); 
-
-    // Cleanup
-    return () => clearInterval(intervalId);
-  }, [fetchData]); 
-
-  // --- Render Logic (UI) ---
-  const indexList = ALLOWED_SYMBOLS.join(', ');
-
-  const currentButtonStyle = {
-    ...buttonBaseStyle,
-    backgroundColor: loading 
-        ? '#c7d2fe'
-        : isButtonPressed 
-        ? '#4f46e5'
-        : isButtonHovering 
-        ? '#4f46e5'
-        : primaryColor,
-    cursor: loading ? 'not-allowed' : 'pointer',
-    boxShadow: loading 
-        ? 'none' 
-        : isButtonPressed 
-        ? '0 0 0 0 rgba(99, 102, 241, 0.5)'
-        : '0 8px 15px -3px rgba(99, 102, 241, 0.4)',
-    transform: isButtonPressed ? 'translateY(1px)' : 'translateY(0)',
-  };
-
-
-  return (
-    <div style={containerStyle}>
-      <div style={cardStyle}>
-        <h1 style={headerStyle}>📅 Next Two Index Expiries</h1>
-        <p style={subHeaderStyle}>
-            Attempting to fetch live data from: <span style={{ fontWeight: '600', color: '#10b981' }}>{SOURCE_URL}</span>
-        </p>
-      
-        <button 
-          onClick={fetchData} 
-          disabled={loading} 
-          onMouseEnter={() => setIsButtonHovering(true)}
-          onMouseLeave={() => {setIsButtonHovering(false); setIsButtonPressed(false);}}
-          onMouseDown={() => setIsButtonPressed(true)}
-          onMouseUp={() => setIsButtonPressed(false)}
-          style={currentButtonStyle}
-        >
-          {loading ? '⏳ Attempting Live Fetch...' : '🔄 Manual Refresh (Fetch Now)'}
-        </button>
-
-        {/* Error Message (Visible when fetch fails) */}
-        {error && (
-          <div style={errorContainerStyle}>
-            <p style={{ fontWeight: 'bold' }}>❌ Critical Data Fetch Error:</p>
-            <p style={{ fontSize: '0.875rem', fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
-                {error}
-                <br /><br />
-                <span style={{fontWeight: 'bold'}}>Recommended Solution:</span> Set up a simple backend server (proxy) to fetch the GZIP file, decompress it server-side, and then send the JSON data to this React application.
-            </p>
-          </div>
-        )}
-
-        {/* Loading Message - show always if loading, even if old data is visible */}
-        {loading && (
-            <div style={loadingStyle}>
-                ⏳ Attempting to download and process {SOURCE_URL}...
-            </div>
-        )}
-
-        {/* Data Display Table - Renders only if 'data' exists AND no critical error */}
-        {data && data.length > 0 && !error && (
-          <div style={{ marginTop: '2rem' }}>
-            <h3 style={listHeaderStyle}>
-                Indices Tracked: <span style={{ color: '#6366f1' }}>{indexList}</span>
-            </h3>
-            
-            <div style={tableWrapperStyle}>
-              <table style={tableStyle}>
-                <thead style={theadStyle}>
-                  <tr>
-                    <th style={thStyle}>Symbol</th>
-                    <th style={thStyle}>Next Expiry Date</th>
-                  </tr>
-                </thead>
-                <tbody style={{ backgroundColor: 'white' }}>
-                  {data.map((item, index) => (
-                    <tr 
-                        key={index} 
-                        onMouseEnter={() => setHoveredRowIndex(index)}
-                        onMouseLeave={() => setHoveredRowIndex(null)}
-                        style={{
-                            ...rowBaseStyle,
-                            backgroundColor: index === hoveredRowIndex 
-                                ? '#eef2ff' 
-                                : index % 2 === 0 
-                                ? rowEvenColor 
-                                : rowOddColor,
-                            borderBottom: index === data.length - 1 ? 'none' : tdBaseStyle.borderBottom,
-                            boxShadow: index === hoveredRowIndex ? 'inset 4px 0 0 0 #6366f1' : 'none',
-                        }}
-                    >
-                      <td style={{
-                            ...tdSymbolStyle,
-                            color: item['Expiry Date'] === 'NO DATA' ? '#ef4444' : index === hoveredRowIndex ? primaryColor : tdSymbolStyle.color
-                        }}>
-                            {item['Symbol']}
-                        </td> 
-                      <td style={{
-                            ...tdDateStyle,
-                            fontWeight: item['Expiry Date'] === 'NO DATA' ? '600' : '500',
-                            color: item['Expiry Date'] === 'NO DATA' ? '#ef4444' : tdDateStyle.color
-                        }}>
-                            {item['Expiry Date']}
-                        </td> 
-                    </tr>
-                    
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <p style={footerStyle}>
-              Total Expiry Records: <span style={{ fontWeight: '600', color: '#374151' }}>{data.length}</span> | 
-              Last Refreshed: {lastRefreshTime.toLocaleTimeString()}
-            </p>
-          </div>
-        )}
-        
-        {!loading && !data && !error && (
-          <p style={noDataStyle}>
-            Click 'Manual Refresh (Fetch Now)' to attempt fetching live data from Upstox instruments JSON.
-          </p>
-        )}
-
-      </div>
-    </div>
-  );
+    // Date constructor expects YYYY, MM-1, DD
+    const date = new Date(year, month - 1, day);
+    
+    // Validate date and return timestamp in milliseconds
+    return isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
-export default ExpiryDataFetcher;
 
-// --- Beautiful, Modern Inline CSS Styles ---
+// --- 2. DATA FETCHING FUNCTION ---
+async function fetchSheetData() {
+    // CRITICAL: Check for credentials before attempting connection
+    if (!SHEET_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
+        console.error("ERROR: Google Sheet credentials are missing from Vercel Environment Variables. Cannot connect to live data.");
+        // Return empty array when no credentials found (no mock data fallback)
+        return []; 
+    }
 
-const primaryColor = '#6366f1'; 
-const secondaryColor = '#818cf8'; 
-const headerBgColor = primaryColor;
-const rowEvenColor = 'white';
-const rowOddColor = '#f9fafb';
+    try {
+        const doc = new GoogleSpreadsheet(SHEET_ID);
 
-const containerStyle = {
-    padding: '1rem', 
-    backgroundColor: '#f8fafc',
-    minHeight: '100vh',
-    fontFamily: 'Inter, sans-serif',
-};
+        // Authenticate using the service account credentials
+        await doc.useServiceAccountAuth({
+            client_email: CLIENT_EMAIL,
+            private_key: PRIVATE_KEY,
+        });
 
-const cardStyle = {
-    maxWidth: '40rem', 
-    margin: '1.5rem auto',
-    backgroundColor: 'white',
-    boxShadow: '0 10px 30px rgba(0, 0, 0, 0.15)',
-    borderRadius: '1rem', 
-    padding: '2rem', 
-};
+        // Load the document info
+        await doc.loadInfo(); 
+        
+        // Assume data is on the first sheet (index 0)
+        const sheet = doc.sheetsByIndex[0]; 
+        
+        // Fetch all rows as objects. Headers must be in the first row.
+        const rows = await sheet.getRows();
 
-const headerStyle = {
-    fontSize: '2rem', 
-    fontWeight: '700', 
-    color: primaryColor, 
-    marginBottom: '0.5rem',
-    textShadow: '0 1px 1px rgba(0,0,0,0.05)',
-};
+        // --- MAPPING LOGIC FOR USER'S COLUMN NAMES ---
+        const instrumentData = rows
+            .filter(row => row.Symbol && row["Expiry Date"]) // Only process rows with both columns filled
+            .map(row => {
+                const rawDate = row["Expiry Date"];
+                const timestamp = parseDateToTimestamp(rawDate);
+                
+                // Returning a simplified structure: we only care about Symbol and Expiry date
+                return {
+                    "underlying_symbol": row.Symbol.trim(), 
+                    "expiry": timestamp, // Unix timestamp in milliseconds
+                    // We need 'instrument_type' for the frontend filter logic (CE/PE). 
+                    // Since the sheet doesn't provide it, we duplicate the entry 
+                    // with a placeholder type so the frontend logic works.
+                    "instrument_type": "CE" 
+                };
+            });
+        
+        // Augment the data by duplicating each entry as 'PE' to ensure the frontend's 
+        // expiry aggregation logic correctly finds the unique dates.
+        const augmentedData = instrumentData.flatMap(item => [
+            {...item, instrument_type: "CE"},
+            {...item, instrument_type: "PE"}
+        ]);
+        
+        console.log(`Successfully retrieved and augmented ${instrumentData.length} unique expiry records from Google Sheet.`);
+        return augmentedData;
 
-const subHeaderStyle = {
-    color: '#64748b',
-    marginBottom: '1.5rem',
-    fontSize: '0.875rem', 
-};
+    } catch (error) {
+        console.error("Error fetching data from Google Sheet:", error.message);
+        // Return empty array on runtime connection/API error
+        return []; 
+    }
+}
 
-const buttonBaseStyle = {
-    width: '100%',
-    padding: '0.75rem 1.5rem', 
-    fontSize: '1rem', 
-    fontWeight: '600', 
-    borderRadius: '0.5rem', 
-    color: 'white',
-    border: 'none',
-    transition: 'background-color 0.2s, box-shadow 0.2s, transform 0.1s',
-    outline: 'none',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-};
 
-const errorContainerStyle = {
-    marginTop: '1rem',
-    padding: '1rem',
-    backgroundColor: '#fee2e2', 
-    borderLeft: '4px solid #f87171', 
-    color: '#b91c1c', 
-    borderRadius: '0.375rem', 
-    fontWeight: '500',
-    whiteSpace: 'normal',
-};
+// --- 3. VERCEL SERVERLESS HANDLER ---
+export default async function handler(req, res) {
+    // Only allow GET requests from the frontend
+    if (req.method !== 'GET') {
+        return res.status(405).json({ message: 'Method Not Allowed' });
+    }
 
-const loadingStyle = {
-    marginTop: '1rem',
-    padding: '1rem',
-    color: secondaryColor, 
-    fontWeight: '500', 
-};
+    // Attempt to fetch data from the sheet
+    const finalData = await fetchSheetData();
 
-const listHeaderStyle = {
-    fontSize: '1rem', 
-    fontWeight: '600', 
-    color: '#374151', 
-    marginBottom: '0.75rem',
-};
-
-const tableWrapperStyle = {
-    overflow: 'hidden', 
-    borderRadius: '0.75rem', 
-    boxShadow: '0 4px 10px rgba(0, 0, 0, 0.08)',
-    border: '1px solid #e5e7eb',
-};
-
-const tableStyle = {
-    minWidth: '100%',
-    borderCollapse: 'collapse',
-};
-
-const theadStyle = {
-    backgroundColor: headerBgColor,
-};
-
-const thStyle = {
-    padding: '1rem 1.5rem', 
-    textAlign: 'left',
-    fontSize: '0.75rem', 
-    fontWeight: '700', 
-    color: 'white',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em', 
-    border: 'none',
-    
-};
-
-const tdBaseStyle = {
-    padding: '1.2rem 1.5rem', 
-    fontSize: '0.9rem', 
-    whiteSpace: 'nowrap',
-    borderBottom: '1px solid #f3f4f6',
-};
-
-const tdSymbolStyle = {
-    ...tdBaseStyle,
-    fontWeight: '700', 
-    color: '#1f2937',
-    letterSpacing: '0.02em',
-};
-
-const tdDateStyle = {
-    ...tdBaseStyle,
-    color: '#374151', 
-};
-
-const rowBaseStyle = {
-    transition: 'background-color 0.2s ease, box-shadow 0.2s ease',
-};
-
-const footerStyle = {
-    marginTop: '1rem',
-    fontSize: '0.875rem', 
-    color: '#64748b', 
-    paddingTop: '0.5rem',
-    borderTop: '1px solid #e5e7eb',
-    textAlign: 'center',
-};
-
-const noDataStyle = {
-    marginTop: '2rem',
-    padding: '1rem',
-    backgroundColor: '#fffbeb', 
-    borderLeft: '4px solid #fcd34d', 
-    color: '#92400e', 
-    borderRadius: '0.375rem', 
-    fontWeight: '500',
-};
+    // Vercel serverless function returns the processed raw data array
+    res.status(200).json(finalData);
+}
