@@ -32,6 +32,10 @@ const parseCSVAndAggregate = (csvText) => {
 
     if (idx_instrument_type === -1 || idx_underlying === -1 || idx_expiry === -1) {
         console.error("Missing required CSV headers: instrument_type, underlying_symbol, or expiry_date");
+        // START DEBUG LOGS
+        console.error("Actual headers received:", headers); 
+        console.error("Start of CSV Text (first 200 chars):", csvText.substring(0, 200));
+        // END DEBUG LOGS
         return [];
     }
 
