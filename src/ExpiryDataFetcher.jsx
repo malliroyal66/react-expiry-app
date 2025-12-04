@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 // Define the exact symbols we are interested in
-const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY","MIDCPNIFTY","BANKEX"];
+const ALLOWED_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "FINIFTY"];
 
 // The confirmed source URL is: https://growwapi-assets.groww.in/instruments/instrument.csv
-// We must route the request through a public CORS proxy to bypass the browser's Cross-Origin Resource Sharing (CORS) security policy.
-const SCRIPT_URL = "https://api.allorigins.win/raw?url=https://growwapi-assets.groww.in/instruments/instrument.csv"; 
+// PREVIOUS PROXY (api.allorigins.win) resulted in a net::ERR_QUIC_PROTOCOL_ERROR.
+// We are switching to a more robust public CORS proxy (thingproxy.freeboard.io) to attempt to resolve the network failure.
+const SCRIPT_URL = "https://thingproxy.freeboard.io/fetch/https://growwapi-assets.groww.in/instruments/instrument.csv"; 
 
 // Helper function to format date from YYYY-MM-DD to DD-MM-YYYY
 const formatDate = (dateString) => {
@@ -20,10 +21,13 @@ const formatDate = (dateString) => {
 
 // --- 1. Modified CSV Parsing and Aggregation Function ---
 const parseCSVAndAggregate = (csvText) => {
+    // Note: The CSV might contain non-UTF-8 characters or extra whitespace, 
+    // which could affect splitting and parsing if not handled robustly.
     const rows = csvText.split('\n').filter(row => row.trim() !== '');
 
     if (rows.length < 2) return [];
 
+    // Map headers and trim whitespace
     const headers = rows[0].split(',').map(header => header.trim());
     
     // Define the required column keys
@@ -48,13 +52,15 @@ const parseCSVAndAggregate = (csvText) => {
 
     // Loop through CSV rows starting from the first data row (index 1)
     for (let i = 1; i < rows.length; i++) {
+        // Use a regex to split the row by commas while handling quoted fields (if any)
+        // For simplicity with this specific public dataset, we continue using simple split.
         const row = rows[i].split(',');
         
         const inst = row[idx_instrument_type] ? row[idx_instrument_type].trim() : '';
         const symbol = row[idx_underlying] ? row[idx_underlying].trim() : '';
         const expiry = row[idx_expiry] ? row[idx_expiry].trim() : '';
 
-        // 1. Filter: Instrument Type is CE or PE
+        // 1. Filter: Instrument Type is CE (Call Equity) or PE (Put Equity)
         // 2. Filter: Symbol is in ALLOWED_SYMBOLS
         if ((inst === "CE" || inst === "PE") && ALLOWED_SYMBOLS.includes(symbol)) {
             // 3. Filter: Expiry is not empty
@@ -68,15 +74,17 @@ const parseCSVAndAggregate = (csvText) => {
     const finalData = [];
 
     ALLOWED_SYMBOLS.forEach(symbol => {
-        // Sorting works correctly on YYYY-MM-DD format
+        // Sorting works correctly on YYYY-MM-DD format (lexicographical sort is date sort)
         const sortedDates = Array.from(expiryMap[symbol]).sort(); 
 
         // Pick the first two unique and sorted expiry dates
         const firstTwo = sortedDates.slice(0, 2); 
 
         if (firstTwo.length === 0) {
+            // Push only one "NO DATA" entry per symbol if nothing is found
             finalData.push({ Symbol: symbol, 'Expiry Date': "NO DATA" });
         } else {
+            // Push each found date separately
             firstTwo.forEach(exp => {
                 // APPLY FORMATTING: Convert YYYY-MM-DD to DD-MM-YYYY for display
                 finalData.push({ Symbol: symbol, 'Expiry Date': formatDate(exp) });
@@ -120,6 +128,7 @@ function ExpiryDataFetcher() {
       setLastRefreshTime(new Date()); // Update refresh time on success
       
     } catch (e) {
+      // If fetch fails (e.g., due to network error like QUIC protocol error), catch it here
       setError(e.message);
       console.error("Failed to fetch data:", e);
     } finally {
@@ -141,7 +150,7 @@ function ExpiryDataFetcher() {
 
     // 3. Cleanup function to clear the interval when the component unmounts
     return () => clearInterval(intervalId);
-  }, [fetchData]); // FIX: Removed 'loading' from dependencies to prevent excessive re-runs
+  }, [fetchData]); 
 
   // --- Render Logic (UI) ---
   const indexList = ALLOWED_SYMBOLS.join(', ');
